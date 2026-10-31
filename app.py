@@ -370,3 +370,61 @@ def rescue_pa_preview(req: RescuePARequest):
 def rescue_audit():
     with LOCK:
         return {'simulation_only':True,'hardware_outputs_enabled':False,'records':RESCUE.audit}
+
+
+# Certified handheld extinguisher comparison — TRAINING ONLY.
+from certified_extinguisher_adapter import AGENTS, ExtinguisherObservation, review_extinguisher
+
+EXTINGUISHER_DESCRIPTIONS = {
+    "water_mist": {"name":"Water mist","benefit":"Cooling and localized Class A suppression where rated","caution":"Weight, water/electricity suitability and discharge reaction"},
+    "abc_dry_chemical": {"name":"ABC dry chemical","benefit":"Multi-class rated portable extinguishing","caution":"Poor visibility, residue and respiratory exposure"},
+    "clean_agent": {"name":"Clean agent","benefit":"Low-residue candidate for properly rated hazards","caution":"Occupant exposure, fire class and certification limits"},
+    "co2": {"name":"Carbon dioxide","benefit":"Low-residue for selected rated hazards","caution":"Asphyxiation, cold discharge and nozzle reaction force"},
+}
+EXTINGUISHER_EVENTS: list[dict] = []
+
+class ExtinguisherScenario(BaseModel):
+    agent: Literal["water_mist","abc_dry_chemical","clean_agent","co2"]
+    pressure_ok: bool = False
+    mounting_verified: bool = False
+    mass_balance_verified: bool = False
+    thermal_limits_verified: bool = False
+    manufacturer_remote_actuation_approved: bool = False
+    qualified_engineer_reviewed: bool = False
+    firefighter_approved: bool = False
+    people_clear: bool = False
+    fresh_sensor_evidence: bool = False
+    communication_healthy: bool = False
+
+@app.get("/api/extinguisher/catalog")
+def extinguisher_catalog():
+    return {"agents":EXTINGUISHER_DESCRIPTIONS,"simulation_only":True,"hardware_release_enabled":False}
+
+@app.post("/api/extinguisher/evaluate")
+def extinguisher_evaluate(req: ExtinguisherScenario):
+    with LOCK:
+        result = review_extinguisher(ExtinguisherObservation(**req.model_dump()))
+        # Sensor evidence is displayed, not equated to personnel clearance.
+        result["live_observation"] = {
+            "ros2_connected":bool(state.ros2.get("connected")),
+            "lidar_clearance_m":state.ros2.get("clearance_m"),
+            "thermal_max_c":state.ros2.get("thermal_max_c"),
+            "target_id":state.target_id,
+            "telemetry_advisory":state.ros2.get("safety",{}).get("advisory","HOLD")
+        }
+        result["agent_profile"] = EXTINGUISHER_DESCRIPTIONS[req.agent]
+        result["simulated_discharge_status"] = "reviewed_only"
+        EXTINGUISHER_EVENTS.insert(0,result)
+        del EXTINGUISHER_EVENTS[100:]
+        state.log("Extinguisher advisory reviewed: "+req.agent)
+        return result
+
+@app.get("/api/extinguisher/status")
+def extinguisher_status():
+    with LOCK:
+        return {"mode":"SIMULATION_ONLY","hardware_release_enabled":False,
+                "latest_review":EXTINGUISHER_EVENTS[0] if EXTINGUISHER_EVENTS else None,
+                "events":EXTINGUISHER_EVENTS[:12],
+                "ros2_connected":bool(state.ros2.get("connected")),
+                "lidar_clearance_m":state.ros2.get("clearance_m"),
+                "thermal_max_c":state.ros2.get("thermal_max_c")}

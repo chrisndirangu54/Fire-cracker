@@ -1,32 +1,54 @@
-"""Indoor suppression decision-support simulation. No physical release endpoints."""
-from dataclasses import dataclass
+"""Fire-suppression decision-support simulation. No actuator integration.
+
+Recommendations are illustrative, not fire engineering approval or live dispatch.
+"""
+from dataclasses import dataclass, asdict
+from typing import Literal
+
+Environment = Literal['indoor', 'forest']
 
 @dataclass(frozen=True)
-class IndoorScene:
-    incident_command_approved: bool = False
-    fire_verified: bool = False
-    sensor_data_fresh: bool = False
-    occupants_clear: bool = False
-    ventilation_reviewed: bool = False
-    agent_certification_reviewed: bool = False
+class Scenario:
+    environment: Environment
+    fire_class: str = 'unknown'
+    people_present: bool = True
+    wind_mps: float = 0.0
+    near_waterway: bool = False
+    sensor_fresh: bool = False
+    operator_approved: bool = False
+    area_verified: bool = False
 
-def assess_indoor(scene: IndoorScene) -> dict:
-    gates = {
-        "command_approval": scene.incident_command_approved,
-        "fire_verified": scene.fire_verified,
-        "fresh_sensors": scene.sensor_data_fresh,
-        "occupants_clear": scene.occupants_clear,
-        "ventilation_review": scene.ventilation_reviewed,
-        "agent_certification_review": scene.agent_certification_reviewed,
-    }
-    return {
-        "candidates": [
-            {"agent": "water_mist", "delivery": "professionally validated fixed or tethered system"},
-            {"agent": "certified_clean_agent", "delivery": "approved stationary system only"},
-        ],
-        "excluded": ["explosive devices", "chemically generated gas munitions", "dropped pressurized cartridges"],
-        "ready_for_tabletop_simulation": all(gates.values()),
-        "gates": gates,
-        "hardware_enabled": False,
-        "warning": "This is not a validated fire-suppression model or fireground clearance.",
-    }
+
+def assess(s: Scenario) -> dict:
+    reasons = []
+    if not s.sensor_fresh:
+        reasons.append('Sensor evidence is stale or missing')
+    if not s.operator_approved:
+        reasons.append('Firefighter/incident-command approval missing')
+    if not s.area_verified:
+        reasons.append('Area and personnel clearance not verified')
+    if s.people_present:
+        reasons.append('Personnel may be in the proposed application area')
+    if s.fire_class == 'unknown':
+        reasons.append('Fire class is unverified; agent compatibility unknown')
+
+    if s.environment == 'forest':
+        options = ['water cooling (simulation)', 'approved wildfire retardant (simulation)',
+                   'approved Class A wetting agent (simulation)']
+        if s.wind_mps >= 6:
+            reasons.append('Wind drift risk: spray application should be reconsidered')
+        if s.near_waterway:
+            reasons.append('Environmental restriction: prohibit chemical retardant/foam near waterways until reviewed')
+        exclusions = ['gas-cloud suppression', 'compressed-gas drops', 'reactive-gas capsules']
+    elif s.environment == 'indoor':
+        options = ['water-mist cooling (simulation)', 'certified stationary clean-agent concept (simulation)']
+        exclusions = ['gas release into occupied spaces', 'dropped pressurized capsules',
+                      'unreviewed agent on energized equipment']
+        if s.people_present:
+            reasons.append('Do not simulate clean-agent recommendation as safe for occupied spaces')
+    else:
+        raise ValueError('Unsupported environment')
+    return {'environment': s.environment, 'candidate_modes': options,
+            'excluded_modes': exclusions, 'simulation_ready': not bool(reasons),
+            'warnings': reasons, 'actuator_command': None,
+            'disclaimer': 'Decision-support exercise only; no live deployment authority.'}
